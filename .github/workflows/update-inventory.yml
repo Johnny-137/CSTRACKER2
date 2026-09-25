@@ -1,0 +1,77 @@
+# ============================================================
+# GitHub Actions Workflow: Automatická aktualizace CS2 inventáře
+# ============================================================
+# Tento soubor říká GitHubu, aby každý den automaticky spustil
+# náš Python skript, který stáhne ceny a aktualizuje web.
+#
+# Cron výraz "0 8 * * *" znamená: "spusť to každý den v 8:00 UTC"
+# (to odpovídá 9:00 SEČ nebo 10:00 SELČ)
+# ============================================================
+
+name: Update CS2 Inventory Prices
+
+on:
+  # Automatické spuštění každý den v 8:00 UTC
+  schedule:
+    - cron: "0 8 * * *"
+  
+  # Možnost spustit ručně přímo z GitHub webu (tlačítko "Run workflow")
+  workflow_dispatch:
+
+# Oprávnění potřebná pro to, aby Actions mohly zapisovat zpět do repozitáře
+permissions:
+  contents: write
+
+jobs:
+  update-prices:
+    name: Fetch Inventory and Update Prices
+    runs-on: ubuntu-latest   # Spustí se na serveru s Linuxem (zdarma)
+    
+    steps:
+      # Krok 1: Stáhne tvůj repozitář na server
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Krok 2: Nainstaluje Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      # Krok 3: Vytvoří složku data/ pokud neexistuje
+      - name: Ensure data directory exists
+        run: |
+          mkdir -p data
+          # Pokud history.json neexistuje, vytvoříme prázdný
+          if [ ! -f data/history.json ]; then
+            echo "{}" > data/history.json
+          fi
+          # Pokud summary.json neexistuje, vytvoříme prázdný
+          if [ ! -f data/summary.json ]; then
+            echo "{}" > data/summary.json
+          fi
+          # Pokud purchase_prices.json neexistuje, vytvoříme prázdný
+          if [ ! -f data/purchase_prices.json ]; then
+            echo "{}" > data/purchase_prices.json
+          fi
+
+      # Krok 4: Spustí náš Python skript
+      - name: Run inventory fetch script
+        run: python fetch_inventory.py
+
+      # Krok 5: Uloží změněné soubory zpět na GitHub
+      # Bez tohoto kroku by se data ztratila po skončení běhu!
+      - name: Commit and push updated data
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "GitHub Actions Bot"
+          git add data/history.json data/summary.json
+          # Commitujeme jen pokud jsou skutečné změny
+          if git diff --staged --quiet; then
+            echo "Žádné změny k uložení."
+          else
+            git commit -m "Auto-update: inventory prices $(date -u '+%Y-%m-%d %H:%M UTC')"
+            git push
+          fi
