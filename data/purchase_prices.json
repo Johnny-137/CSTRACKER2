@@ -1,0 +1,6 @@
+_NAVOD	"Sem doplň své nákupní ceny v EUR. Název předmětu musí být PŘESNĚ stejný jako v CS2 (market_hash_name). Tuto řádku _NAVOD můžeš smazat nebo nechat - skript ji ignoruje."
+_PRIKLAD_1	"Zkopíruj přesný název zbraně z webu po prvním spuštění skriptu ze souboru data/summary.json"
+_PRIKLAD_2	"Ceny pište jako čísla (s tečkou jako desetinnou čárkou), např. 12.50 znamená 12,50 EUR"
+AK-47 | Redline (Field-Tested)	8.50JS:8.5
+AWP | Asiimov (Field-Tested)	35.00JS:35
+M4A4 | Howl (Field-Tested)	0
