@@ -15,8 +15,10 @@ Skript proto čeká 3 sekundy mezi každým dotazem na cenu.
 import json
 import time
 import os
+import random
 import urllib.request
 import urllib.parse
+import urllib.error
 from datetime import datetime, timezone
 
 # ============================================================
@@ -30,24 +32,52 @@ DELAY_BETWEEN_REQUESTS = 3.5      # Čekání v sekundách mezi dotazy (kvůli r
 # ============================================================
 
 
-def fetch_url(url, max_retries=3):
+def fetch_url(url, max_retries=6):
     """
     Stáhne obsah dané URL. Zkusí to max_retries-krát při chybě.
     Vrací text nebo None při neúspěchu.
+
+    DŮLEŽITÁ POZNÁMKA k chybě "429 Too Many Requests":
+    GitHub Actions běží na sdílených serverech, ze kterých posílají
+    požadavky na Steam TISÍCE dalších uživatelů najednou (hlavně v
+    "kulatých" časech jako 8:00 UTC, kdy mají naplánováno spuštění
+    i jiní lidé). Steam proto danou IP adresu na chvíli zablokuje.
+    NENÍ to kvůli tvému účtu ani nastavení soukromí!
+
+    Řešení: počkat déle a zkusit to znovu - blokace bývá jen dočasná.
+    Proto při chybě 429 čekáme postupně déle (15s, 30s, 60s, 90s...).
     """
     headers = {
         # Říkáme Steamu, že jsme běžný prohlížeč (jinak nás může odmítnout)
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
+
+    # Čekací doby (v sekundách) mezi jednotlivými pokusy - postupně delší
+    backoff_delays = [15, 30, 60, 90, 120, 180]
+
     for attempt in range(max_retries):
         try:
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=15) as response:
                 return response.read().decode("utf-8")
+
+        except urllib.error.HTTPError as e:
+            if e.code == 429:
+                wait = backoff_delays[min(attempt, len(backoff_delays) - 1)]
+                print(f"  Pokus {attempt + 1}/{max_retries}: Steam nás dočasně omezil "
+                      f"(429 - příliš mnoho požadavků). Čekám {wait}s a zkusím to znovu...")
+            else:
+                wait = 5
+                print(f"  Pokus {attempt + 1}/{max_retries} selhal: HTTP chyba {e.code}")
+
+            if attempt < max_retries - 1:
+                time.sleep(wait)
+
         except Exception as e:
             print(f"  Pokus {attempt + 1}/{max_retries} selhal: {e}")
             if attempt < max_retries - 1:
-                time.sleep(5)  # Čekej 5 sekund před dalším pokusem
+                time.sleep(10)
+
     return None
 
 
@@ -204,7 +234,16 @@ def main():
     print("CS2 Inventory Tracker - Denní aktualizace")
     print(f"Čas spuštění: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}")
     print("=" * 60)
-    
+
+    # Malé náhodné počkání na startu (5-25 sekund).
+    # Důvod: spousta lidí má GitHub Actions naplánované přesně na
+    # "kulaté" časy (např. 8:00 UTC). Když všichni vystřelí požadavek
+    # na Steam ve stejnou sekundu, zvyšuje se šance na 429 chybu.
+    # Náhodné zpoždění nás "rozprostře" a sníží riziko kolize.
+    startup_delay = random.randint(5, 25)
+    print(f"Čekám {startup_delay}s před startem (rozložení zátěže)...")
+    time.sleep(startup_delay)
+
     # --- Načteme historii a nákupní ceny ---
     history = load_json_file("data/history.json", default={})
     purchase_prices = load_json_file("data/purchase_prices.json", default={})
