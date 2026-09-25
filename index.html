@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CS2 Inventory Tracker</title>
+
+  <!-- Tailwind CSS - moderní stylovací framework (načítáme z internetu, zdarma) -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Chart.js - knihovna pro kreslení grafů (načítáme z internetu, zdarma) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+
+  <style>
+    /* Vlastní styly, které Tailwind neumí sám */
+    body {
+      background-color: #0f1117;
+      color: #e2e8f0;
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    }
+
+    /* Animace načítání (spinner) */
+    .spinner {
+      width: 40px;
+      height: 40px;
+      border: 4px solid rgba(255,255,255,0.1);
+      border-top-color: #f97316;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Karta předmětu - výchozí styl */
+    .item-card {
+      background: linear-gradient(135deg, #1a1f2e 0%, #141821 100%);
+      border: 1px solid rgba(255,255,255,0.06);
+      transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+      cursor: pointer;
+    }
+    .item-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.4);
+      border-color: rgba(249,115,22,0.3);
+    }
+
+    /* Levý barevný proužek rarity */
+    .rarity-bar {
+      width: 4px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    /* Graf v modálním okně */
+    .chart-container {
+      position: relative;
+      height: 280px;
+    }
+
+    /* Modální okno */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.75);
+      backdrop-filter: blur(4px);
+      z-index: 50;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+    .modal-content {
+      background: #1a1f2e;
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 16px;
+      width: 100%;
+      max-width: 680px;
+      max-height: 90vh;
+      overflow-y: auto;
+    }
+
+    /* Čísla zisku/ztráty */
+    .profit { color: #4ade80; }
+    .loss   { color: #f87171; }
+    .neutral { color: #94a3b8; }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: #0f1117; }
+    ::-webkit-scrollbar-thumb { background: #374151; border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: #4b5563; }
+  </style>
+</head>
+
+<body class="min-h-screen">
+
+  <!-- HLAVIČKA -->
+  <header class="sticky top-0 z-40 border-b border-white/5"
+          style="background: rgba(15,17,23,0.95); backdrop-filter: blur(12px);">
+    <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between flex-wrap gap-3">
+      <div class="flex items-center gap-3">
+        <!-- CS2 ikona (textová, bez závislosti na obrázku) -->
+        <div class="w-10 h-10 rounded-lg flex items-center justify-center text-2xl"
+             style="background: linear-gradient(135deg, #f97316, #ef4444);">
+          🎮
+        </div>
+        <div>
+          <h1 class="text-xl font-bold text-white">CS2 Inventory Tracker</h1>
+          <p class="text-xs text-slate-500">Automatická aktualizace každý den v 8:00 UTC</p>
+        </div>
+      </div>
+
+      <!-- Celková hodnota inventáře -->
+      <div class="flex items-center gap-6">
+        <div class="text-right">
+          <div class="text-xs text-slate-500 uppercase tracking-wide">Celková hodnota</div>
+          <div id="total-value" class="text-2xl font-bold text-orange-400">—</div>
+        </div>
+        <div class="text-right">
+          <div class="text-xs text-slate-500 uppercase tracking-wide">Počet skinů</div>
+          <div id="item-count" class="text-2xl font-bold text-white">—</div>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <!-- HLAVNÍ OBSAH -->
+  <main class="max-w-7xl mx-auto px-4 py-8">
+
+    <!-- Statistiky nahoře -->
+    <div id="stats-bar" class="hidden grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+      <div class="rounded-xl p-4" style="background:#1a1f2e; border: 1px solid rgba(255,255,255,0.06);">
+        <div class="text-xs text-slate-500 mb-1">Hodnota inventáře</div>
+        <div id="stat-total" class="text-xl font-bold text-orange-400">—</div>
+      </div>
+      <div class="rounded-xl p-4" style="background:#1a1f2e; border: 1px solid rgba(255,255,255,0.06);">
+        <div class="text-xs text-slate-500 mb-1">Zaplaceno celkem</div>
+        <div id="stat-paid" class="text-xl font-bold text-white">—</div>
+      </div>
+      <div class="rounded-xl p-4" style="background:#1a1f2e; border: 1px solid rgba(255,255,255,0.06);">
+        <div class="text-xs text-slate-500 mb-1">Zisk / Ztráta</div>
+        <div id="stat-pnl" class="text-xl font-bold">—</div>
+      </div>
+      <div class="rounded-xl p-4" style="background:#1a1f2e; border: 1px solid rgba(255,255,255,0.06);">
+        <div class="text-xs text-slate-500 mb-1">Datum aktualizace</div>
+        <div id="stat-date" class="text-xl font-bold text-white">—</div>
+      </div>
+    </div>
+
+    <!-- Filtry a řazení -->
+    <div class="flex flex-wrap gap-3 mb-6 items-center">
+      <input
+        id="search-input"
+        type="text"
+        placeholder="🔍 Hledat zbraň..."
+        class="px-4 py-2 rounded-lg text-sm text-white outline-none flex-grow md:flex-grow-0 md:w-64"
+        style="background:#1a1f2e; border: 1px solid rgba(255,255,255,0.1);"
+        oninput="filterAndRender()"
+      />
+      <select
+        id="sort-select"
+        class="px-4 py-2 rounded-lg text-sm text-white outline-none cursor-pointer"
+        style="background:#1a1f2e; border: 1px solid rgba(255,255,255,0.1);"
+        onchange="filterAndRender()"
+      >
+        <option value="price-desc">Cena: od nejvyšší</option>
+        <option value="price-asc">Cena: od nejnižší</option>
+        <option value="name-asc">Název A-Z</option>
+        <option value="pnl-desc">Největší zisk</option>
+        <option value="pnl-asc">Největší ztráta</option>
+      </select>
+      <label class="flex items-center gap-2 text-sm text-slate-400 cursor-pointer select-none">
+        <input type="checkbox" id="only-with-purchase" onchange="filterAndRender()"
+               class="w-4 h-4 rounded accent-orange-500" />
+        Jen se zadanou nákupní cenou
+      </label>
+    </div>
+
+    <!-- Indikátor načítání -->
+    <div id="loading" class="flex flex-col items-center justify-center py-24 gap-4">
+      <div class="spinner"></div>
+      <p class="text-slate-500 text-sm">Načítám data inventáře...</p>
+    </div>
+
+    <!-- Chybová zpráva -->
+    <div id="error-msg" class="hidden text-center py-24">
+      <div class="text-5xl mb-4">⚠️</div>
+      <p class="text-red-400 text-lg font-semibold" id="error-text">Chyba při načítání</p>
+      <p class="text-slate-500 text-sm mt-2">Zkontroluj, že GitHub Actions proběhl alespoň jednou.</p>
+    </div>
+
+    <!-- Prázdný stav -->
+    <div id="empty-msg" class="hidden text-center py-24">
+      <div class="text-5xl mb-4">📦</div>
+      <p class="text-slate-400 text-lg">Žádné předměty nenalezeny</p>
+      <p class="text-slate-600 text-sm mt-2">Zkus jiný hledaný výraz</p>
+    </div>
+
+    <!-- Mřížka karet předmětů -->
+    <div id="items-grid" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+    </div>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer class="border-t border-white/5 mt-16 py-8 text-center text-slate-600 text-sm">
+    <p>Data ze Steam Market Community · Ceny jsou orientační a bez záruky</p>
+    <p class="mt-1">Aktualizace probíhají automaticky každý den přes GitHub Actions</p>
+  </footer>
+
+  <!-- MODÁLNÍ OKNO pro detail předmětu a graf -->
+  <div id="modal" class="modal-backdrop hidden" onclick="closeModal(event)">
+    <div class="modal-content p-6" onclick="event.stopPropagation()">
+      <!-- Hlavička modálu -->
+      <div class="flex items-start gap-4 mb-6">
+        <img id="modal-icon" src="" alt="" class="w-24 h-24 rounded-lg object-contain"
+             style="background:#0d1117;" />
+        <div class="flex-1 min-w-0">
+          <div id="modal-rarity-badge" class="inline-block text-xs px-2 py-0.5 rounded mb-1"></div>
+          <h2 id="modal-name" class="text-xl font-bold text-white break-words"></h2>
+          <div class="flex gap-6 mt-3">
+            <div>
+              <div class="text-xs text-slate-500">Aktuální cena</div>
+              <div id="modal-price" class="text-2xl font-bold text-orange-400"></div>
+            </div>
+            <div id="modal-purchase-section" class="hidden">
+              <div class="text-xs text-slate-500">Koupeno za</div>
+              <div id="modal-purchase" class="text-2xl font-bold text-slate-300"></div>
+            </div>
+            <div id="modal-pnl-section" class="hidden">
+              <div class="text-xs text-slate-500">Zisk / Ztráta</div>
+              <div id="modal-pnl" class="text-2xl font-bold"></div>
+            </div>
+          </div>
+        </div>
+        <button onclick="closeModal()" class="text-slate-500 hover:text-white text-2xl leading-none ml-2">×</button>
+      </div>
+
+      <!-- Graf vývoje ceny -->
+      <div class="chart-container mb-4">
+        <canvas id="modal-chart"></canvas>
+      </div>
+
+      <p class="text-xs text-slate-600 text-center">
+        Historie cen od prvního dne sledování · Ceny v EUR ze Steam Market
+      </p>
+    </div>
+  </div>
+
+  <script>
+    // ==========================================================
+    // GLOBÁLNÍ PROMĚNNÉ
+    // ==========================================================
+    let allItems = [];          // Všechny předměty (surová data)
+    let currentChart = null;    // Aktuální instance grafu (pro správné zničení při novém otevření)
+
+    // ==========================================================
+    // NAČTENÍ DAT
+    // ==========================================================
+    async function loadData() {
+      try {
+        // Načteme soubor summary.json (generovaný Python skriptem)
+        // ?t= je "cache buster" - nutí prohlížeč vždy stáhnout novou verzi
+        const response = await fetch(`data/summary.json?t=${Date.now()}`);
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
+
+        const data = await response.json();
+        const items = Object.entries(data);
+
+        if (items.length === 0) {
+          showError("Data jsou prázdná. Spusť GitHub Actions workflow alespoň jednou.");
+          return;
+        }
+
+        // Převedeme objekt na pole objektů pro snazší práci
+        allItems = items.map(([name, info]) => ({
+          name,
+          ...info
+        }));
+
+        // Spočítáme a zobrazíme statistiky
+        updateStats();
+
+        // Zobrazíme předměty
+        filterAndRender();
+
+        // Skryjeme spinner
+        document.getElementById("loading").classList.add("hidden");
+        document.getElementById("items-grid").classList.remove("hidden");
+        document.getElementById("stats-bar").classList.remove("hidden");
+
+      } catch (err) {
+        console.error("Chyba načítání:", err);
+        showError(`Nepodařilo se načíst data: ${err.message}`);
+      }
+    }
+
+    // ==========================================================
+    // STATISTIKY (horní panel)
+    // ==========================================================
+    function updateStats() {
+      let totalValue = 0;
+      let totalPaid = 0;
+      let itemsWithPurchase = 0;
+      let latestDate = null;
+
+      for (const item of allItems) {
+        const qty = item.quantity || 1;
+        const price = item.latest_price;
+        const purchase = item.purchase_price;
+
+        if (price) {
+          totalValue += price * qty;
+        }
+
+        if (purchase && purchase > 0 && price) {
+          totalPaid += purchase * qty;
+          itemsWithPurchase++;
+        }
+
+        // Najdeme nejnovější datum
+        const dates = Object.keys(item.price_history || {});
+        if (dates.length > 0) {
+          const newest = dates.sort().at(-1);
+          if (!latestDate || newest > latestDate) latestDate = newest;
+        }
+      }
+
+      // Zobrazíme statistiky
+      document.getElementById("total-value").textContent = formatPrice(totalValue);
+      document.getElementById("item-count").textContent = allItems.length;
+      document.getElementById("stat-total").textContent = formatPrice(totalValue);
+
+      if (itemsWithPurchase > 0) {
+        const pnl = totalValue - totalPaid;
+        document.getElementById("stat-paid").textContent = formatPrice(totalPaid);
+        const pnlEl = document.getElementById("stat-pnl");
+        pnlEl.textContent = (pnl >= 0 ? "+" : "") + formatPrice(pnl);
+        pnlEl.className = "text-xl font-bold " + (pnl >= 0 ? "profit" : "loss");
+      } else {
+        document.getElementById("stat-paid").textContent = "—";
+        document.getElementById("stat-pnl").textContent = "—";
+      }
+
+      document.getElementById("stat-date").textContent = latestDate || "—";
+    }
+
+    // ==========================================================
+    // FILTROVÁNÍ A ŘAZENÍ
+    // ==========================================================
+    function filterAndRender() {
+      const query = document.getElementById("search-input").value.toLowerCase();
+      const sort = document.getElementById("sort-select").value;
+      const onlyPurchase = document.getElementById("only-with-purchase").checked;
+
+      let filtered = allItems.filter(item => {
+        const nameMatch = item.friendly_name.toLowerCase().includes(query) ||
+                          item.name.toLowerCase().includes(query);
+        const purchaseMatch = !onlyPurchase || (item.purchase_price && item.purchase_price > 0);
+        return nameMatch && purchaseMatch;
+      });
+
+      // Seřadíme
+      filtered.sort((a, b) => {
+        switch (sort) {
+          case "price-desc": return (b.latest_price || 0) - (a.latest_price || 0);
+          case "price-asc":  return (a.latest_price || 0) - (b.latest_price || 0);
+          case "name-asc":   return a.friendly_name.localeCompare(b.friendly_name);
+          case "pnl-desc": {
+            const pnlA = getPnL(a);
+            const pnlB = getPnL(b);
+            if (pnlA === null && pnlB === null) return 0;
+            if (pnlA === null) return 1;
+            if (pnlB === null) return -1;
+            return pnlB - pnlA;
+          }
+          case "pnl-asc": {
+            const pnlA = getPnL(a);
+            const pnlB = getPnL(b);
+            if (pnlA === null && pnlB === null) return 0;
+            if (pnlA === null) return 1;
+            if (pnlB === null) return -1;
+            return pnlA - pnlB;
+          }
+        }
+      });
+
+      renderGrid(filtered);
+    }
+
+    // ==========================================================
+    // VYKRESLENÍ MŘÍŽKY KARET
+    // ==========================================================
+    function renderGrid(items) {
+      const grid = document.getElementById("items-grid");
+      const emptyMsg = document.getElementById("empty-msg");
+
+      if (items.length === 0) {
+        grid.innerHTML = "";
+        emptyMsg.classList.remove("hidden");
+        return;
+      }
+
+      emptyMsg.classList.add("hidden");
+
+      grid.innerHTML = items.map(item => {
+        const price = item.latest_price;
+        const purchase = item.purchase_price;
+        const pnl = getPnL(item);
+        const rarityColor = item.rarity_color ? `#${item.rarity_color}` : "#6b7280";
+        const qty = item.quantity || 1;
+
+        // Počet dní sledování
+        const dates = Object.keys(item.price_history || {}).sort();
+        const trackingDays = dates.length;
+
+        // Změna ceny od prvního dne vs. dnes
+        let changeHtml = "";
+        if (dates.length >= 2 && item.first_tracked_price && price) {
+          const change = ((price - item.first_tracked_price) / item.first_tracked_price * 100);
+          const changeClass = change >= 0 ? "profit" : "loss";
+          const changeSign = change >= 0 ? "▲" : "▼";
+          changeHtml = `<span class="${changeClass} text-xs">${changeSign} ${Math.abs(change).toFixed(1)}%</span>`;
+        }
+
+        return `
+        <div class="item-card rounded-xl p-4 flex gap-3" onclick="openModal('${escapeJs(item.name)}')">
+          <!-- Barevný proužek rarity vlevo -->
+          <div class="rarity-bar" style="background-color: ${rarityColor};"></div>
+
+          <!-- Obrázek zbraně -->
+          <div class="flex-shrink-0">
+            <img
+              src="${item.icon_url || ''}"
+              alt="${escapeHtml(item.friendly_name)}"
+              class="w-20 h-16 object-contain rounded"
+              style="background: rgba(0,0,0,0.3);"
+              onerror="this.src='data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 width=%2280%22 height=%2264%22><rect width=%2280%22 height=%2264%22 fill=%22%23111%22/><text x=%2240%22 y=%2238%22 text-anchor=%22middle%22 fill=%22%23444%22 font-size=%2220%22>?</text></svg>'"
+            />
+          </div>
+
+          <!-- Text -->
+          <div class="flex-1 min-w-0">
+            <p class="text-xs text-slate-500 truncate">${escapeHtml(item.name.split(" | ")[0] || "")}</p>
+            <p class="text-sm font-semibold text-white truncate leading-snug">
+              ${escapeHtml(item.friendly_name)}
+            </p>
+            ${qty > 1 ? `<p class="text-xs text-slate-500">× ${qty} ks</p>` : ""}
+
+            <!-- Cena a PnL -->
+            <div class="mt-2 flex items-end justify-between">
+              <div>
+                <div class="text-lg font-bold text-orange-400">
+                  ${price !== null ? formatPrice(price) : '<span class="text-slate-600 text-sm">—</span>'}
+                </div>
+                ${pnl !== null
+                  ? `<div class="text-xs ${pnl >= 0 ? 'profit' : 'loss'}">${pnl >= 0 ? '+' : ''}${formatPrice(pnl)}</div>`
+                  : (purchase && purchase > 0
+                      ? `<div class="text-xs text-slate-600">zaplaceno: ${formatPrice(purchase)}</div>`
+                      : "")
+                }
+              </div>
+              <div class="text-right">
+                ${changeHtml}
+                <div class="text-xs text-slate-600 mt-1">${trackingDays}d dat</div>
+              </div>
+            </div>
+          </div>
+        </div>
+        `;
+      }).join("");
+    }
+
+    // ==========================================================
+    // MODÁLNÍ OKNO (detail + graf)
+    // ==========================================================
+    function openModal(itemName) {
+      const item = allItems.find(i => i.name === itemName);
+      if (!item) return;
+
+      const rarityColor = item.rarity_color ? `#${item.rarity_color}` : "#6b7280";
+      const price = item.latest_price;
+      const purchase = item.purchase_price;
+      const pnl = getPnL(item);
+      const qty = item.quantity || 1;
+
+      // Naplníme modál daty
+      document.getElementById("modal-icon").src = item.icon_url || "";
+      document.getElementById("modal-name").textContent = item.friendly_name + (qty > 1 ? ` (× ${qty})` : "");
+      document.getElementById("modal-price").textContent = price !== null ? formatPrice(price) : "—";
+
+      const badge = document.getElementById("modal-rarity-badge");
+      badge.style.background = rarityColor + "33";  // průhledná verze barvy
+      badge.style.color = rarityColor;
+      badge.style.border = `1px solid ${rarityColor}66`;
+      badge.textContent = item.name.split("(").at(-1)?.replace(")", "") || "";
+
+      // Nákupní cena a PnL
+      if (purchase && purchase > 0) {
+        document.getElementById("modal-purchase-section").classList.remove("hidden");
+        document.getElementById("modal-purchase").textContent = formatPrice(purchase * qty);
+
+        document.getElementById("modal-pnl-section").classList.remove("hidden");
+        const pnlEl = document.getElementById("modal-pnl");
+        if (pnl !== null) {
+          pnlEl.textContent = (pnl >= 0 ? "+" : "") + formatPrice(pnl);
+          pnlEl.className = "text-2xl font-bold " + (pnl >= 0 ? "profit" : "loss");
+        }
+      } else {
+        document.getElementById("modal-purchase-section").classList.add("hidden");
+        document.getElementById("modal-pnl-section").classList.add("hidden");
+      }
+
+      // Graf
+      buildChart(item, rarityColor);
+
+      // Zobrazíme modál
+      document.getElementById("modal").classList.remove("hidden");
+      document.body.style.overflow = "hidden";
+    }
+
+    function closeModal(event) {
+      if (event && event.target !== document.getElementById("modal")) return;
+      document.getElementById("modal").classList.add("hidden");
+      document.body.style.overflow = "";
+    }
+
+    // ==========================================================
+    // GRAF (Chart.js)
+    // ==========================================================
+    function buildChart(item, rarityColor) {
+      const canvas = document.getElementById("modal-chart");
+      const ctx = canvas.getContext("2d");
+
+      // Zničíme starý graf (jinak by Chart.js protestoval)
+      if (currentChart) {
+        currentChart.destroy();
+        currentChart = null;
+      }
+
+      const priceHistory = item.price_history || {};
+      const dates = Object.keys(priceHistory).sort();
+      const prices = dates.map(d => priceHistory[d]);
+
+      if (dates.length === 0) {
+        // Žádná data → zobrazíme zprávu přímo na canvas
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = "#475569";
+        ctx.font = "16px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("Žádná historická data", canvas.width / 2, canvas.height / 2);
+        return;
+      }
+
+      // Přidáme nákupní cenu jako přímku (pokud existuje)
+      const purchase = item.purchase_price;
+      const datasets = [
+        {
+          label: "Tržní cena (EUR)",
+          data: prices,
+          borderColor: rarityColor || "#f97316",
+          backgroundColor: rarityColor ? rarityColor + "22" : "#f9731622",
+          borderWidth: 2.5,
+          pointRadius: dates.length > 30 ? 0 : 4,
+          pointHoverRadius: 6,
+          fill: true,
+          tension: 0.3,
+        }
+      ];
+
+      if (purchase && purchase > 0) {
+        datasets.push({
+          label: "Nákupní cena",
+          data: Array(dates.length).fill(purchase),
+          borderColor: "#64748b",
+          borderWidth: 1.5,
+          borderDash: [6, 3],
+          pointRadius: 0,
+          fill: false,
+        });
+      }
+
+      currentChart = new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: dates,
+          datasets,
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: {
+              labels: { color: "#94a3b8", font: { size: 12 } }
+            },
+            tooltip: {
+              backgroundColor: "#1e293b",
+              borderColor: "rgba(255,255,255,0.1)",
+              borderWidth: 1,
+              titleColor: "#e2e8f0",
+              bodyColor: "#94a3b8",
+              callbacks: {
+                label: (ctx) => ` ${ctx.dataset.label}: ${formatPrice(ctx.parsed.y)}`
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: { color: "rgba(255,255,255,0.04)" },
+              ticks: {
+                color: "#64748b",
+                maxTicksLimit: 8,
+                font: { size: 11 },
+              }
+            },
+            y: {
+              grid: { color: "rgba(255,255,255,0.04)" },
+              ticks: {
+                color: "#64748b",
+                font: { size: 11 },
+                callback: (v) => formatPrice(v)
+              }
+            }
+          }
+        }
+      });
+    }
+
+    // ==========================================================
+    // POMOCNÉ FUNKCE
+    // ==========================================================
+    function formatPrice(value) {
+      if (value === null || value === undefined) return "—";
+      return value.toFixed(2) + " €";
+    }
+
+    function getPnL(item) {
+      if (!item.purchase_price || !item.latest_price) return null;
+      if (item.purchase_price <= 0) return null;
+      const qty = item.quantity || 1;
+      return (item.latest_price - item.purchase_price) * qty;
+    }
+
+    function escapeHtml(str) {
+      return String(str)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+    }
+
+    function escapeJs(str) {
+      return String(str)
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '\\"');
+    }
+
+    function showError(msg) {
+      document.getElementById("loading").classList.add("hidden");
+      const errEl = document.getElementById("error-msg");
+      errEl.classList.remove("hidden");
+      document.getElementById("error-text").textContent = msg;
+    }
+
+    // Klávesa Escape zavře modál
+    document.addEventListener("keydown", (e) => {
+      if (e.key === "Escape") {
+        document.getElementById("modal").classList.add("hidden");
+        document.body.style.overflow = "";
+      }
+    });
+
+    // ==========================================================
+    // START
+    // ==========================================================
+    loadData();
+  </script>
+</body>
+</html>
